@@ -1,0 +1,63 @@
+# kv/summary.kv — visual layout for Tab 2 (Summary)
+
+<SummaryScreen>:
+    name: "summary"
+
+    BoxLayout:
+        orientation: "vertical"
+        padding: dp(24)
+        spacing: dp(20)
+
+        MDLabel:
+            text: "Summary"
+            font_style: "H5"
+            halign: "center"
+            text_size: self.width, None
+            size_hint_y: None
+            height: self.texture_size[1]
+
+        MDLabel:
+            id: collected_label
+            text: "Total collected: 0.00"
+            font_style: "H6"
+            halign: "center"
+            text_size: self.width, None
+            size_hint_y: None
+            height: self.texture_size[1]
+
+        MDLabel:
+            id: spent_label
+            text: "Total spent: 0.00"
+            font_style: "H6"
+            halign: "center"
+            text_size: self.width, None
+            size_hint_y: None
+            height: self.texture_size[1]
+
+        MDLabel:
+            id: balance_label
+            text: "Remaining balance: 0.00"
+            font_style: "H4"
+            halign: "center"
+            text_size: self.width, None
+            size_hint_y: None
+            height: self.texture_size[1]
+
+        MDRaisedButton:
+            text: "Export Data"
+            pos_hint: {"center_x": 0.5}
+            on_release: root.export_data()
+
+        MDRaisedButton:
+            text: "Export Report"
+            pos_hint: {"center_x": 0.5}
+            on_release: root.export_report()
+
+        MDRaisedButton:
+            text: "Start Fresh"
+            pos_hint: {"center_x": 0.5}
+            md_bg_color: 0.7, 0.2, 0.2, 1
+            on_release: root.confirm_start_fresh()
+
+        Widget:
+            # spacer so the content sits near the top instead of centered
