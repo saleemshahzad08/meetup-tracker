@@ -1,16 +1,13 @@
-name: Build APK
-
+# Build APK (fixed: pre-download NDK + improved cache)
 on:
   push:
   workflow_dispatch:
-    # Lets you click a "Run workflow" button on GitHub's website to
-    # trigger a build manually, without needing to push new code.
+
+name: Build APK
 
 jobs:
   build-android:
     name: Build Android APK
-    # Pinned to a specific Ubuntu version (rather than "latest") so this
-    # doesn't unexpectedly break again if GitHub changes their default.
     runs-on: ubuntu-22.04
 
     steps:
@@ -29,7 +26,7 @@ jobs:
           sudo apt-get install -y \
             build-essential git zip unzip autoconf libtool pkg-config \
             zlib1g-dev libncurses5-dev libncursesw5-dev cmake \
-            libffi-dev libssl-dev automake python3-pip python3-venv
+            libffi-dev libssl-dev automake python3-pip python3-venv curl
 
       - name: Install Buildozer and Cython
         run: |
@@ -42,12 +39,72 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-global-${{ hashFiles('buildozer.spec') }}
+          # Use a stable key so the NDK and other downloaded platform files are reused across runs
+          key: buildozer-global-${{ runner.os }}-v1
           restore-keys: |
-            buildozer-global-
+            buildozer-global-${{ runner.os }}-
 
-      - name: Build APK
+      - name: Pre-install Android NDK (android-ndk-r28c)
+        # This step downloads the exact NDK build expected by Buildozer (android-ndk-r28c),
+        # with retries and a check to skip if already present in the cache.
         run: |
+          set -euo pipefail
+          NDK_NAME="android-ndk-r28c"
+          # Official Google download for r28c (linux)
+          NDK_ZIP="${NDK_NAME}-linux.zip"
+          NDK_URL="https://dl.google.com/android/repository/${NDK_ZIP}"
+          PLATFORM_DIR="$HOME/.buildozer/android/platform"
+          NDK_DIR="${PLATFORM_DIR}/${NDK_NAME}"
+
+          mkdir -p "${PLATFORM_DIR}"
+
+          if [ -d "${NDK_DIR}" ]; then
+            echo "NDK already installed at ${NDK_DIR}"
+          else
+            echo "NDK not found, downloading ${NDK_URL}"
+            cd /tmp
+            retry_count=0
+            max_retries=5
+            # robust curl with retries
+            until curl -fSL --retry 5 --retry-delay 5 --connect-timeout 20 -o "${NDK_ZIP}" "${NDK_URL}"; do
+              retry_count=$((retry_count + 1))
+              if [ "${retry_count}" -ge "${max_retries}" ]; then
+                echo "Failed to download NDK after ${max_retries} attempts"
+                exit 1
+              fi
+              echo "Download failed, retrying (${retry_count}/${max_retries})..."
+              sleep $((10 * retry_count))
+            done
+
+            unzip -q "${NDK_ZIP}" -d "${PLATFORM_DIR}"
+            # The zip extracts to a folder whose name should match $NDK_NAME; ensure final directory matches expected path
+            if [ -d "${PLATFORM_DIR}/${NDK_NAME}" ]; then
+              echo "NDK extracted to ${PLATFORM_DIR}/${NDK_NAME}"
+            else
+              # Move any extracted folder to the expected name
+              extracted_dir=$(unzip -Z -1 "${NDK_ZIP}" | head -n 1 | cut -d'/' -f1)
+              if [ -d "${PLATFORM_DIR}/${extracted_dir}" ]; then
+                mv "${PLATFORM_DIR}/${extracted_dir}" "${NDK_DIR}"
+                echo "Moved ${extracted_dir} to ${NDK_DIR}"
+              else
+                echo "Unexpected NDK layout after unzip"
+                ls -la "${PLATFORM_DIR}"
+                exit 1
+              fi
+            fi
+            rm -f "${NDK_ZIP}"
+          fi
+
+          # Tell buildozer / p4a where the NDK is
+          echo "ANDROIDNDK=${NDK_DIR}" >> "$GITHUB_ENV"
+          echo "ANDROIDNDK set to ${NDK_DIR}"
+
+      - name: Build APK (with retries)
+        env:
+          # Ensure Buildozer sees the NDK we installed
+          ANDROIDNDK: ${{ env.ANDROIDNDK }}
+        run: |
+          # Retry loop: attempt build up to 3 times with backoff
           for attempt in {1..3}; do
             echo "Build attempt $attempt of 3"
             if yes | buildozer -v android debug; then
