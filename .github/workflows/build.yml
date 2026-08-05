@@ -3,26 +3,55 @@ name: Build APK
 on:
   push:
   workflow_dispatch:
+    # Lets you click a "Run workflow" button on GitHub's website to
+    # trigger a build manually, without needing to push new code.
 
 jobs:
   build-android:
     name: Build Android APK
-    runs-on: ubuntu-latest
+    # Pinned to a specific Ubuntu version (rather than "latest") so this
+    # doesn't unexpectedly break again if GitHub changes their default.
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
         with:
-          command: buildozer android debug
-          workdir: .
-          buildozer_version: stable
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential git zip unzip autoconf libtool pkg-config \
+            zlib1g-dev libncurses5-dev libncursesw5-dev cmake \
+            libffi-dev libssl-dev automake python3-pip python3-venv
+
+      - name: Install Buildozer and Cython
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install --user --upgrade Cython==0.29.36 virtualenv
+          pip3 install --user --upgrade buildozer
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Cache Buildozer global directory
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          key: buildozer-global-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-global-
+
+      - name: Build APK
+        run: |
+          yes | buildozer -v android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: meetup-tracker-apk
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: bin/*.apk
