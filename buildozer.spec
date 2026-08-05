@@ -1,51 +1,55 @@
-name: Build Android APK
+[app]
 
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
+# (str) Title of your application
+title = Meetup Tracker
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+# (str) Package name
+package.name = meetuptracker
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+# (str) Package domain (needed for android/ios packaging)
+package.domain = org.test
 
-      - name: Set up Python
-        uses: actions/uses/python@v5
-        with:
-          python-version: '3.11'
+# (str) Source code where the main.py live
+source.dir = .
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install buildozer cython==0.29.36
+# (list) Source files to include (let empty to include all the base dir)
+source.include_exts = py,png,jpg,kv,atlas,db
 
-      - name: Cache Buildozer global directory
-        uses: actions/cache@v4
-        with:
-          path: ~/.buildozer
-          key: buildozer-runner-${{ runner.os }}-py3.11.6-${{ hashFiles('**/buildozer.spec') }}
-          restore-keys: |
-            buildozer-runner-${{ runner.os }}-py3.11.6-
+# (str) Application versioning (method 1)
+version = 0.1
 
-      - name: Clean stale Buildozer and p4a caches
-        run: |
-          rm -rf .buildozer
-          rm -rf ~/.buildozer/android/platform/python-for-android/.build
-          rm -rf ~/.buildozer/android/platform/python-for-android/dist/hostpython3* || true
+# (list) Application requirements
+requirements = python3==3.11.6,hostpython3==3.11.6,kivy,kivymd,plyer,pillow,pyjnius,sqlite3,reportlab
 
-      - name: Build APK with Buildozer
-        uses: ArtemSydoryk/buildozer-action@v1
-        with:
-          command: buildozer -v android debug
+# (str) Supported orientation (one of landscape, sensorLandscape, portrait or all)
+orientation = portrait
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: package
-          path: bin/*.apk
+# (bool) Indicate if the application should be fullscreen or not
+fullscreen = 0
+
+# (list) Permissions
+android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+
+# (int) Target Android API, should be as high as possible.
+android.api = 34
+
+# (int) Minimum API your APK will support.
+android.minapi = 24
+
+# (str) The Android arch to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
+android.archs = arm64-v8a
+
+# (bool) enables Android auto backup feature (Android API >= 23)
+android.allow_backup = True
+
+# (bool) Enable AndroidX support. Enable when packaging KivyMD or any other project depending on AndroidX.
+android.enable_androidx = True
+
+
+[buildozer]
+
+# (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
+log_level = 2
+
+# (int) Display warning if buildozer is run as root (0 = ignore, 1 = warn, 2 = error)
+warn_on_root = 1
