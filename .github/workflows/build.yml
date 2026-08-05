@@ -46,9 +46,71 @@ jobs:
           restore-keys: |
             buildozer-global-
 
+      # Fix for the repeated "HTTP Error 502: Bad Gateway" failure.
+      #
+      # Our previous attempt pointed Buildozer at a pre-installed NDK via
+      # an environment variable, but Buildozer kept trying to download
+      # its own copy anyway - meaning it doesn't reliably honor that
+      # variable. This time we skip relying on Buildozer noticing an env
+      # var at all: we download the NDK ourselves (with our own retries,
+      # so a single transient 502 doesn't kill the whole job) and place
+      # it in the EXACT folder Buildozer already checks before it tries
+      # to download anything - so it just finds it sitting there and
+      # never attempts the download in the first place.
+      # (This step runs after the cache-restore step above, so once a
+      # build has succeeded once, later runs find the NDK already
+      # sitting in the restored cache and skip the download too.)
+      - name: Pre-install Android NDK (avoids Buildozer's own download step)
+        run: |
+          set -e
+          PLATFORM_DIR="$HOME/.buildozer/android/platform"
+          NDK_DIR="$PLATFORM_DIR/android-ndk-r28c"
+          mkdir -p "$PLATFORM_DIR"
+
+          if [ -d "$NDK_DIR" ]; then
+            echo "NDK already present at $NDK_DIR (from cache) - skipping download"
+          else
+            cd /tmp
+            NDK_URL="https://dl.google.com/android/repository/android-ndk-r28c-linux.zip"
+            for i in 1 2 3 4 5; do
+              echo "Download attempt $i..."
+              if curl -fSL --retry 5 --retry-delay 10 "$NDK_URL" -o ndk.zip; then
+                echo "Download succeeded"
+                break
+              fi
+              if [ "$i" -eq 5 ]; then
+                echo "All download attempts failed"
+                exit 1
+              fi
+              sleep $((i * 15))
+            done
+            unzip -q ndk.zip -d "$PLATFORM_DIR"
+            rm -f ndk.zip
+          fi
+
+          # Belt-and-braces: also export it as an env var, in case any
+          # part of the toolchain does check for it.
+          echo "ANDROIDNDK=$NDK_DIR" >> "$GITHUB_ENV"
+
       - name: Build APK
         run: |
-          yes | buildozer -v android debug
+          for attempt in 1 2 3; do
+            echo "Build attempt $attempt of 3"
+            if yes | buildozer -v android debug; then
+              echo "Build succeeded"
+              exit 0
+            else
+              BUILD_EXIT_CODE=$?
+              if [ $attempt -lt 3 ]; then
+                WAIT_TIME=$((30 * attempt + RANDOM % 30))
+                echo "Build failed with exit code $BUILD_EXIT_CODE, waiting ${WAIT_TIME}s before retry..."
+                sleep $WAIT_TIME
+              else
+                echo "Build failed after 3 attempts"
+                exit $BUILD_EXIT_CODE
+              fi
+            fi
+          done
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
