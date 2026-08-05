@@ -1,0 +1,29 @@
+# kv/root.kv — the app shell: screen area on top, tab buttons at the bottom
+
+<RootWidget>:
+    orientation: "vertical"
+
+    ScreenManager:
+        id: screen_manager
+
+    BoxLayout:
+        size_hint_y: None
+        height: dp(56)
+
+        MDFlatButton:
+            id: btn_add_payment
+            text: "Add Payment"
+            size_hint_x: 1
+            on_release: root.switch_tab("add_payment")
+
+        MDFlatButton:
+            id: btn_summary
+            text: "Summary"
+            size_hint_x: 1
+            on_release: root.switch_tab("summary")
+
+        MDFlatButton:
+            id: btn_expenses
+            text: "Expenses"
+            size_hint_x: 1
+            on_release: root.switch_tab("expenses")
