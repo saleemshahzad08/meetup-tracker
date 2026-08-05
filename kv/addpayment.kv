@@ -1,0 +1,66 @@
+# kv/addpayment.kv — visual layout for Tab 1 (Add Payment)
+
+<AddPaymentScreen>:
+    name: "add_payment"
+
+    BoxLayout:
+        orientation: "vertical"
+        padding: dp(16)
+        spacing: dp(12)
+
+        MDLabel:
+            text: "Add Payment"
+            font_style: "H5"
+            size_hint_y: None
+            height: self.texture_size[1]
+
+        MDTextField:
+            id: name_field
+            hint_text: "Person's name"
+
+        MDTextField:
+            id: amount_field
+            hint_text: "Amount paid"
+            input_filter: "float"
+
+        MDLabel:
+            id: receipt_status_label
+            text: "No receipt attached"
+            theme_text_color: "Secondary"
+            size_hint_y: None
+            height: self.texture_size[1]
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(48)
+            spacing: dp(8)
+
+            MDRaisedButton:
+                text: "Pick from Gallery"
+                on_release: root.pick_from_gallery()
+
+            MDRaisedButton:
+                text: "Take Photo"
+                on_release: root.take_photo()
+
+        MDRaisedButton:
+            text: "Save Payment"
+            pos_hint: {"center_x": 0.5}
+            on_release: root.save_payment()
+
+        MDLabel:
+            id: total_label
+            text: "Total collected: 0.00"
+            font_style: "H6"
+            size_hint_y: None
+            height: self.texture_size[1]
+
+        MDLabel:
+            text: "Past Payments (tap one to view its receipt)"
+            theme_text_color: "Secondary"
+            size_hint_y: None
+            height: self.texture_size[1]
+
+        ScrollView:
+            MDList:
+                id: payments_list

@@ -1,0 +1,46 @@
+# kv/expenses.kv — visual layout for Tab 3 (Expenses)
+
+<ExpensesScreen>:
+    name: "expenses"
+
+    BoxLayout:
+        orientation: "vertical"
+        padding: dp(16)
+        spacing: dp(12)
+
+        MDLabel:
+            text: "Expenses"
+            font_style: "H5"
+            size_hint_y: None
+            height: self.texture_size[1]
+
+        MDTextField:
+            id: item_field
+            hint_text: "What was it for? (e.g. Venue rental)"
+
+        MDTextField:
+            id: amount_field
+            hint_text: "Amount spent"
+            input_filter: "float"
+
+        MDRaisedButton:
+            text: "Save Expense"
+            pos_hint: {"center_x": 0.5}
+            on_release: root.save_expense()
+
+        MDLabel:
+            id: total_label
+            text: "Total spent: 0.00"
+            font_style: "H6"
+            size_hint_y: None
+            height: self.texture_size[1]
+
+        MDLabel:
+            text: "Past Expenses (tap one for details)"
+            theme_text_color: "Secondary"
+            size_hint_y: None
+            height: self.texture_size[1]
+
+        ScrollView:
+            MDList:
+                id: expenses_list
