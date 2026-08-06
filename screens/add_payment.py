@@ -12,6 +12,15 @@ requires deep native manifest changes to fix properly. Rather than ship
 a button that reliably fails, we guide the user to use their phone's
 own camera app and then attach the photo via "Pick from Gallery" -
 which achieves the same result.
+
+Note on "Pick from Gallery": plyer's Android gallery picker turned out
+to be unreliable too - it tries to resolve a "real" file path internally
+and increasingly fails to do so on modern Android, silently passing
+None through instead of the picked file. So on Android, this screen
+bypasses plyer entirely and talks to Android's own document picker
+directly (the same lower-level system plyer itself wraps), which avoids
+that buggy resolution step. Desktop testing still uses plyer, since
+that path works fine there.
 """
 
 import os
@@ -35,8 +44,20 @@ try:
 except Exception:
     filechooser = None
 
+_GALLERY_REQUEST_CODE = 51341  # arbitrary but fixed, just needs to be unique
+
 
 class AddPaymentScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._pending_receipt_path = None
+        if platform == "android":
+            # Bind exactly once (here, not inside pick_from_gallery) so
+            # repeated taps don't stack up duplicate result handlers.
+            from android import activity  # noqa: p4a-provided, Android only
+
+            activity.bind(on_activity_result=self._on_android_activity_result)
+
     def on_pre_enter(self, *args):
         self._pending_receipt_path = None
         self.refresh_list()
@@ -45,72 +66,72 @@ class AddPaymentScreen(Screen):
     # ---------- Receipt attach ----------
 
     def pick_from_gallery(self):
+        if platform == "android":
+            self._pick_from_gallery_android()
+        else:
+            self._pick_from_gallery_desktop()
+
+    def _pick_from_gallery_desktop(self):
         if filechooser is None:
             self._show_message("Gallery picker isn't available on this system.")
             return
         try:
             filechooser.open_file(
-                on_selection=self._on_file_selected,
+                on_selection=self._on_desktop_file_selected,
                 filters=[("Images", "*.jpg", "*.jpeg", "*.png")],
             )
         except Exception as e:
             self._show_message(f"Couldn't open gallery: {e}")
 
-    def take_photo(self):
-        self._show_message(
-            "Direct camera capture isn't supported yet.\n\n"
-            "Instead: take the photo with your phone's regular camera "
-            "app, then come back here and tap \"Pick from Gallery\" to "
-            "attach it."
-        )
+    def _pick_from_gallery_android(self):
+        try:
+            from android import mActivity
+            from jnius import autoclass
 
-    def _on_file_selected(self, selection):
-        # On Android, this callback fires from a background thread (the
-        # result of the gallery activity), not Kivy's main thread.
-        # Updating widgets directly from here can silently fail to show
-        # up on screen, or - once moved onto the main thread - crash the
-        # app if something inside raises an error. Clock.schedule_once
-        # hands the work to the main thread, and _handle_file_selected
-        # wraps everything in a try/except so any error becomes a
-        # friendly message instead of a crash.
-        Clock.schedule_once(lambda dt: self._handle_file_selected(selection), 0)
+            Intent = autoclass("android.content.Intent")
+            intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            intent.setType("image/*")
+            mActivity.startActivityForResult(intent, _GALLERY_REQUEST_CODE)
+        except Exception as e:
+            self._show_message(f"Couldn't open gallery: {e}")
 
-    def _handle_file_selected(self, selection):
-        if not selection:
+    def _on_android_activity_result(self, request_code, result_code, intent):
+        if request_code != _GALLERY_REQUEST_CODE:
             return
-        source_path = selection[0]
+        if result_code != -1:  # Android's Activity.RESULT_OK == -1
+            return  # user backed out of the picker - nothing to do
+        if intent is None:
+            return
+        uri = intent.getData()
+        if uri is None:
+            return
+        # This callback fires from Android's own activity-result thread,
+        # not Kivy's main thread - hand off to the main thread before
+        # touching any widgets, same reasoning as the desktop path below.
+        Clock.schedule_once(lambda dt: self._handle_android_uri(uri), 0)
+
+    def _handle_android_uri(self, uri):
         app = MDApp.get_running_app()
         dest_name = f"{uuid.uuid4().hex}.jpg"
         dest_path = os.path.join(app.receipts_dir, dest_name)
-
         try:
-            if source_path.startswith("content://"):
-                # Android's gallery picker hands back a "content://"
-                # reference, not a normal file path - it can only be
-                # read through Android's own ContentResolver, not a
-                # plain Python open()/shutil.copy().
-                self._copy_content_uri(source_path, dest_path)
-            else:
-                shutil.copy(source_path, dest_path)
+            self._copy_content_uri(uri, dest_path)
         except Exception as e:
             self._show_message(f"Couldn't save receipt image: {e}")
             return
-
         self._pending_receipt_path = dest_path
         self.ids.receipt_status_label.text = f"Receipt attached: {dest_name}"
 
-    def _copy_content_uri(self, content_uri, dest_path):
-        if platform != "android":
-            raise RuntimeError("content:// paths are only expected on Android")
-
+    def _copy_content_uri(self, uri, dest_path):
+        """Reads the bytes behind an Android content:// Uri object and
+        writes them to a normal file, via Android's own ContentResolver
+        (the only reliable way to read a picked gallery image)."""
         from jnius import autoclass
 
-        Uri = autoclass("android.net.Uri")
         PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        activity = PythonActivity.mActivity
-        resolver = activity.getContentResolver()
-        uri = Uri.parse(content_uri)
-
+        activity_obj = PythonActivity.mActivity
+        resolver = activity_obj.getContentResolver()
         input_stream = resolver.openInputStream(uri)
         try:
             chunk = bytearray(8192)
@@ -122,6 +143,34 @@ class AddPaymentScreen(Screen):
                     out_file.write(bytes(chunk[:n]))
         finally:
             input_stream.close()
+
+    def take_photo(self):
+        self._show_message(
+            "Direct camera capture isn't supported yet.\n\n"
+            "Instead: take the photo with your phone's regular camera "
+            "app, then come back here and tap \"Pick from Gallery\" to "
+            "attach it."
+        )
+
+    # ---------- Desktop-only file handling (plyer path) ----------
+
+    def _on_desktop_file_selected(self, selection):
+        Clock.schedule_once(lambda dt: self._handle_desktop_selection(selection), 0)
+
+    def _handle_desktop_selection(self, selection):
+        if not selection or not selection[0]:
+            return
+        source_path = selection[0]
+        app = MDApp.get_running_app()
+        dest_name = f"{uuid.uuid4().hex}.jpg"
+        dest_path = os.path.join(app.receipts_dir, dest_name)
+        try:
+            shutil.copy(source_path, dest_path)
+        except Exception as e:
+            self._show_message(f"Couldn't save receipt image: {e}")
+            return
+        self._pending_receipt_path = dest_path
+        self.ids.receipt_status_label.text = f"Receipt attached: {dest_name}"
 
     # ---------- Save ----------
 
